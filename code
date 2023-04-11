@@ -1,0 +1,89 @@
+use sqlx::mysql::{MySqlConnectOptions, MySqlConnection, MySqlQueryResult};
+use sqlx::{ConnectOptions, Row};
+
+#[derive(Debug)]
+struct Employee {
+    id: i32,
+    first_name: String,
+    last_name: String,
+    salary: f64,
+}
+
+async fn connect_to_db() -> Result<MySqlConnection, sqlx::Error> {
+    MySqlConnectOptions::new()
+        .host("localhost")
+        .socket("/run/mysqld/mysqld.sock")
+        .username("root")
+        .password("rootpassword")
+        .database("test")
+        .connect().await
+}
+
+async fn generate_table(conn: &mut MySqlConnection) -> Result<MySqlQueryResult, sqlx::Error> {
+    sqlx::query("CREATE TABLE IF NOT EXISTS employees (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    first_name TEXT,
+                    last_name TEXT,
+                    salary DOUBLE
+                );",)
+        .execute(conn).await
+}
+
+impl Employee {
+    async fn into_db(&mut self, conn: &mut MySqlConnection) -> Result<MySqlQueryResult, sqlx::Error> {
+        sqlx::query("INSERT INTO employees (id, first_name, last_name, salary) 
+                            VALUES (?, ?, ?, ?);",)
+            .bind(&self.id)
+            .bind(&self.first_name)
+            .bind(&self.last_name)
+            .bind(&self.salary)
+            .execute(conn)
+            .await
+    }
+    
+    async fn get(conn: &mut MySqlConnection, id: i32) -> Result<Employee, sqlx::Error> {
+        let res = sqlx::query("SELECT * FROM employees WHERE id = ?;",)
+        .bind(&id.to_string())
+        .fetch_one(conn)
+        .await?;
+        Ok(Employee {
+            id: res.get::<i32, &str>("id"), 
+            first_name: res.get::<String, &str>("first_name"), 
+            last_name: res.get::<String, &str>("last_name"),
+            salary: res.get::<f64, &str>("salary"),
+        })
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<(), sqlx::Error> {
+    mysql_init(3)?; // Needed for this playground to work
+
+    let mut conn = connect_to_db().await?;
+    generate_table(&mut conn).await?;
+    
+
+    let mut john = Employee {
+        id: 0,
+        first_name: "John".into(),
+        last_name: "Doe".into(),
+        salary: 64000.0,
+    };
+    let mut jane = Employee {
+        id: 1,
+        first_name: "Jane".into(),
+        last_name: "Smith".into(),
+        salary: 68000.0,
+    };
+
+    john.into_db(&mut conn).await?;
+    jane.into_db(&mut conn).await?;
+    
+    let fisrt_employee = Employee::get(&mut conn, 0).await?;
+    let second_employee = Employee::get(&mut conn, 1).await?;
+
+    println!("1st employee: {:?}", fisrt_employee);
+    println!("2nd employee: {:?}", second_employee);
+    
+    Ok(())
+}
